@@ -93,7 +93,8 @@
 }
 
 .reports-action-button:hover {
-  background: #087f6e;
+  background: #176fc1;
+  color: #ffffff;
 }
 
 .reports-action-button:disabled {

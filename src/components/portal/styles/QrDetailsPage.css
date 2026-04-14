@@ -112,7 +112,7 @@
 }
 
 .qr-ticket {
-  width: min(100%, 230px);
+  width: min(100%, 300px);
   margin-top: 18px;
   padding: 16px 16px 14px;
   border: 1px solid #dbe5ec;

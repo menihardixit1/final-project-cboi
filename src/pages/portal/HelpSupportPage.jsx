@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Snackbar } from '../../components/ui/Snackbar' 
 import {
   closeSupportTicket,
   createSupportTicket,
@@ -6,8 +7,11 @@ import {
   getSupportTickets,
   reopenSupportTicket,
   sendSupportReply,
+  uploadSupportFiles,
+  createSupportTicketApi
 } from '../../services/supportApi'
 import '../../components/portal/styles/HelpSupportPage.css'
+
 
 const initialTickets = [
   {
@@ -158,7 +162,7 @@ function mapApiMessage(message) {
 
 function mapApiTicket(ticket) {
   return {
-    id: `#${ticket.ticketId}`,
+    id: `${ticket.ticketId}`,
     transactionId: ticket.transactionId,
     raisedOn: formatTicketDate(ticket.raisedDate),
     raisedDate: ticket.raisedDate,
@@ -172,17 +176,20 @@ function mapApiTicket(ticket) {
 }
 
 function getStatusClassName(status) {
-  switch (status) {
-    case 'Pending':
+  const s = status?.toLowerCase()
+
+  switch (s) {
+    case 'pending':
       return 'help-support-status help-support-status--pending'
-    case 'Unresolved':
+
+    case 'new':
+    case 'open':
       return 'help-support-status help-support-status--unresolved'
-    case 'Resolved':
+
+    case 'solved':
+    case 'closed':
       return 'help-support-status help-support-status--resolved'
-    case 'Open':
-      return 'help-support-status help-support-status--open'
-    case 'Closed':
-      return 'help-support-status help-support-status--closed'
+
     default:
       return 'help-support-status'
   }
@@ -234,22 +241,76 @@ export function HelpSupportPage() {
     })
   }, [submittedFilters, tickets])
 
-  const handleRaiseTicketSubmit = async (event) => {
-    event.preventDefault()
+const handleRaiseTicketSubmit = async (event) => {
+  event.preventDefault()
 
-    const response = await createSupportTicket({
-      transactionId: raiseForm.transactionId || `2139${Date.now()}`.slice(0, 13),
-      phoneNumber: '+91 9349872421',
-      operation: raiseForm.reason || 'Other',
-      reasonType: raiseForm.reason || 'Other',
-      description: raiseForm.description || 'No description added.',
+  try {
+    const payload = {
+      body: raiseForm.description || 'No description',
+
+      subject: raiseForm.reason || 'General Issue',
+
+      ticket_form_id: 47501075391257,
+
+      // ✅ from upload API
+      attachmentURL: raiseForm.attachmentURL || [],
+      attachmentName: raiseForm.attachmentName || [],
+
+      custom_fields: [
+        {
+          id: 900013325983,
+          value: raiseForm.reason || 'General Issue',
+        },
+        {
+          id: 32240028334873,
+          value: 'qr',
+        },
+        {
+          id: 32240169914009,
+          value: 'damaged_qr',
+        },
+        {
+          id: 900013326003,
+          value: raiseForm.description || 'No description',
+        }
+      ]
+    }
+
+    const response = await createSupportTicketApi(payload)
+
+    // ✅ Snackbar
+    setSnackbarState({
+      open: true,
+      message: response?.statusDesc,
+      colorType: response?.statusCode === 0 ? 'success' : 'warning',
     })
-    const nextTicket = mapApiTicket(response.data)
 
-    setTickets((current) => [nextTicket, ...current])
-    setRaiseForm(initialRaiseForm)
-    setIsRaiseTicketOpen(false)
+    if (response?.statusCode === 0) {
+      const newTicket = {
+        id: `#${response.ticket_id}`,
+        ticketId: response.ticket_id?.toString(),
+        status: 'new',
+        raisedDate: new Date().toISOString(),
+        description: payload.body,
+        reasonType: payload.subject,
+      }
+
+      setTickets((current) => [newTicket, ...current])
+
+      setRaiseForm(initialRaiseForm)
+      setIsRaiseTicketOpen(false)
+    }
+
+  } catch (error) {
+    console.error(error)
+
+    setSnackbarState({
+      open: true,
+      message: error.message || 'Failed to create ticket',
+      colorType: 'danger',
+    })
   }
+}
 
   const handleFilterSubmit = async () => {
     if (!filters.startDate || !filters.endDate) {
@@ -277,12 +338,74 @@ export function HelpSupportPage() {
 
     try {
       const response = await getSupportTickets(nextFilters)
+      // console.log('Fetched Tickets:', response)
       setTickets(response.data.map(mapApiTicket))
     } finally {
       setIsLoadingTickets(false)
     }
   }
 
+const handleFileChange = async (event) => {
+  const files = Array.from(event.target.files || [])
+
+  setRaiseForm((current) => ({
+    ...current,
+    attachmentName: files.map((f) => f.name).join(', ')
+  }))
+
+  try {
+    const response = await uploadSupportFiles(files)
+
+    console.log('Upload Response:', response)
+
+    // ✅ Snackbar
+    setSnackbarState({
+      open: true,
+      message: response?.statusDesc || 'Upload done',
+      colorType: response?.statusCode === 0 ? 'success' : 'warning',
+    })
+
+    // ✅ Store uploaded files
+    if (response?.statusCode === 0) {
+      if (response?.statusCode === 0) {
+  const uploadedFiles = response?.data?.files || []
+
+  setRaiseForm((prev) => ({
+    ...prev,
+    uploadedFiles,
+    attachmentURL: uploadedFiles.map(f => f.url),     // ✅ ADD
+    attachmentName: uploadedFiles.map(f => f.filename) // ✅ ADD
+  }))
+}
+      setRaiseForm((prev) => ({
+        ...prev,
+        uploadedFiles: response?.data?.files || []
+      }))
+    }
+
+  } catch (error) {
+    console.error(error)
+
+    setSnackbarState({
+      open: true,
+      message: error.message || 'Upload failed',
+      colorType: 'danger',
+    })
+  }
+}
+const getAccessToken = () => {
+  const sessionData = sessionStorage.getItem('cboi-auth-session-temporary')
+
+  if (!sessionData) return null
+
+  try {
+    const parsed = JSON.parse(sessionData)
+    return parsed?.accessToken || null
+  } catch (error) {
+    console.error('Error parsing session storage:', error)
+    return null
+  }
+}
   const handleSendReply = async () => {
     if (!replyMessage.trim() || !activeTicket) {
       return
@@ -306,25 +429,61 @@ export function HelpSupportPage() {
     )
     setReplyMessage('')
   }
+  const [snackbarState, setSnackbarState] = useState({
+  open: false,
+  message: '',
+  colorType: 'info',
+})
 
-  const handleCloseTicket = async () => {
-    if (!activeTicket) {
-      return
+const handleCloseTicket = async () => {
+  if (!activeTicket) return
+
+  try {
+    const rawId = activeTicket.ticketId || activeTicket.id
+
+    const cleanId = Number(
+      String(rawId).replace('#', '').trim()
+    )
+
+    if (isNaN(cleanId)) {
+      throw new Error('Invalid ticket ID')
     }
 
-    await closeSupportTicket(activeTicket.id.replace('#', ''))
-    setTickets((current) =>
-      current.map((ticket) =>
-        ticket.id === activeTicket.id
-          ? {
-              ...ticket,
-              status: 'Closed',
-            }
-          : ticket,
-      ),
-    )
+    const response = await closeSupportTicket(cleanId)
+
+    // ✅ Show snackbar
+    setSnackbarState({
+      open: true,
+      message: response?.statusDesc,
+      colorType: response?.statusCode === 0 ? 'success' : 'warning',
+    })
+
+    // ✅ Close modal ALWAYS (important)
     setIsCloseTicketOpen(false)
+
+setIsCloseTicketOpen(false)
+
+    // ✅ Update UI only if success
+    if (response?.statusCode === 0) {
+      setTickets((current) =>
+        current.map((ticket) =>
+          ticket.ticketId === cleanId.toString()
+            ? { ...ticket, status: 'closed' }
+            : ticket
+        )
+      )
+    }
+
+  } catch (error) {
+    console.error(error)
+
+    setSnackbarState({
+      open: true,
+      message: error.message || 'Something went wrong',
+      colorType: 'danger',
+    })
   }
+}
 
   const handleReopenTicket = async () => {
     if (!activeTicket) {
@@ -344,20 +503,28 @@ export function HelpSupportPage() {
     )
   }
 
-  const handleViewDetails = async (ticketId) => {
-    setActiveTicketId(ticketId)
+const handleViewDetails = async (ticketId) => {
+  setActiveTicketId(ticketId)
 
-    try {
-      const response = await getSupportTicketDetails(ticketId.replace('#', ''))
-      const detailedTicket = mapApiTicket(response.data)
+  try {
+    const cleanId = Number(ticketId.replace('#', '')) // ✅ FIX
 
-      setTickets((current) =>
-        current.map((ticket) => (ticket.id === ticketId ? detailedTicket : ticket)),
+    const response = await getSupportTicketDetails(cleanId)
+
+    const detailedTicket = mapApiTicket(response.data)
+
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.ticketId === cleanId.toString()
+          ? { ...ticket, ...detailedTicket }
+          : ticket
       )
-    } catch (error) {
-      console.error('[Help Support] Failed to fetch ticket details', error)
-    }
+    )
+
+  } catch (error) {
+    console.error('[Help Support] Failed to fetch ticket details', error)
   }
+}
 
   return (
     <section className="portal-section help-support-page">
@@ -472,7 +639,7 @@ export function HelpSupportPage() {
                   ) : filteredTickets.length ? (
                     filteredTickets.map((ticket) => (
                       <tr key={ticket.id}>
-                        <td>{ticket.transactionId}</td>
+                        <td>{ticket.id}</td>
                         <td>{ticket.raisedOn}</td>
                         <td>{ticket.number}</td>
                         <td>{ticket.operation}</td>
@@ -668,21 +835,19 @@ export function HelpSupportPage() {
                 />
               </label>
 
-              <label className="help-support-field">
-                <span>Attachment</span>
-                <label className="help-support-attachment">
-                  <input
-                    type="file"
-                    onChange={(event) =>
-                      setRaiseForm((current) => ({
-                        ...current,
-                        attachmentName: event.target.files?.[0]?.name ?? '',
-                      }))
-                    }
-                  />
-                  <span>{raiseForm.attachmentName || 'Please Add Attachment'}</span>
-                </label>
-              </label>
+<label className="help-support-field">
+  <span>Attachment</span>
+  <label className="help-support-attachment">
+    <input
+      type="file"
+      multiple
+      onChange={handleFileChange}
+    />
+    <span>
+      {raiseForm.attachmentName || 'Please Add Attachment'}
+    </span>
+  </label>
+</label>
 
               <div className="help-support-modal__actions">
                 <button
@@ -749,6 +914,14 @@ export function HelpSupportPage() {
           </div>
         </div>
       ) : null}
+      <Snackbar
+  open={snackbarState.open}
+  message={snackbarState.message}
+  colorType={snackbarState.colorType}
+  onClose={() =>
+    setSnackbarState((prev) => ({ ...prev, open: false }))
+  }
+/>
     </section>
   )
 }

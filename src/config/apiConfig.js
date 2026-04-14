@@ -1,16 +1,20 @@
 export const apiConfig = {
   baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+  reportBaseUrl:
+    import.meta.env.VITE_REPORT_BASE_URL ?? 'https://services-cboi-uat.isupay.in',
   fetchUserDetailsEndpoint:
     import.meta.env.VITE_FETCH_USER_DETAILS_ENDPOINT ?? '/CBOI/fetch/fetchById',
   reportsQuerySubmitUserEndpoint:
     import.meta.env.VITE_REPORTS_QUERY_SUBMIT_USER_ENDPOINT ??
-    'https://api-preprod.txninfra.com/encrV4/CBOI/reports/querysubmit_user',
+    '/CBOI/reports/querysubmit_username',
+  reportsStatusEndpoint:
+    import.meta.env.VITE_REPORTS_STATUS_ENDPOINT ?? '/CBOI/reports/get_report_status',
   currentLanguageEndpoint:
     import.meta.env.VITE_CURRENT_LANGUAGE_ENDPOINT ?? '/CBOI/isu_soundbox/user_api/current_language',
   fetchLanguageEndpoint:
-    import.meta.env.VITE_FETCH_LANGUAGE_ENDPOINT ?? '/CBOI/isu_soundbox/lang/fetch_language',
+    import.meta.env.VITE_FETCH_LANGUAGE_ENDPOINT ?? '/CBOI/isu_soundbox/lang/status_update',
   updateLanguageEndpoint:
-    import.meta.env.VITE_UPDATE_LANGUAGE_ENDPOINT ?? '/CBOI/isu_soundbox/lang/update_language',
+    import.meta.env.VITE_UPDATE_LANGUAGE_ENDPOINT ?? '/CBOI/isu_soundbox/lang/status_update',
   staticQrEndpoint:
     import.meta.env.VITE_STATIC_QR_ENDPOINT ?? '/CBOI/merchant/qr_convert_to_base64',
   userDetailsSerialNumber:
@@ -19,7 +23,7 @@ export const apiConfig = {
   // authorizationScheme: import.meta.env.VITE_STATIC_AUTH_SCHEME ?? 'Bearer',
   staticPassKey: import.meta.env.VITE_STATIC_PASS_KEY ?? '',
   passKeyHeader: import.meta.env.VITE_PASS_KEY_HEADER ?? 'pass_key',
-  passKeyStorageKey: 'idbi-pass-key',
+  passKeyStorageKey: 'cboi-pass-key',
 }
 
 export function getStaticAuthorizationHeader() {

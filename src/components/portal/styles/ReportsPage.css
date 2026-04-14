@@ -96,6 +96,11 @@
   background: #087f6e;
 }
 
+.reports-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .reports-action-button--small {
   padding-inline: 16px;
 }

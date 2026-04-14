@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../../components/ui/Button'
 import { authStorageKeys } from '../../config/authConfig'
-import { apiConfig } from '../../config/apiConfig'
 import { LoaderOverlay } from '../../components/ui/LoaderOverlay'
 import { Snackbar } from '../../components/ui/Snackbar'
-import { apiRequest } from '../../services/apiClient'
+import {
+  fetchAvailableLanguages,
+  fetchCurrentLanguage,
+  getProfileCurrentLanguage,
+  updateLanguage,
+} from '../../services/languageApi'
+import { storage } from '../../utils/storage'
 import '../../components/portal/styles/LanguageUpdatePage.css'
 
 // Initial form state
@@ -47,6 +52,19 @@ export function LanguageUpdatePage() {
   // Fetch user details from sessionStorage
   // -----------------------------
   useEffect(() => {
+    const selectedProfile = storage.getSelectedProfile()
+
+    if (selectedProfile?.vpa_id || selectedProfile?.serial_number) {
+      const profileLanguage = getProfileCurrentLanguage(selectedProfile)
+      setFormValues((current) => ({
+        ...current,
+        vpaId: selectedProfile?.vpa_id ?? current.vpaId,
+        deviceSerialNumber: selectedProfile?.serial_number ?? current.deviceSerialNumber,
+        currentLanguage: profileLanguage.value || current.currentLanguage,
+      }))
+      return
+    }
+
     const storedUserDetails = window.sessionStorage.getItem(authStorageKeys.userDetails)
     if (!storedUserDetails) {
       return
@@ -71,6 +89,8 @@ export function LanguageUpdatePage() {
         ...current,
         vpaId: firstUserDetails.vpa_id ?? current.vpaId,
         deviceSerialNumber: firstUserDetails.serial_number ?? current.deviceSerialNumber,
+        currentLanguage:
+          getProfileCurrentLanguage(firstUserDetails).value || current.currentLanguage,
       }))
     } catch (error) {
       console.error('[Language Update] Failed to parse stored user details', error)
@@ -110,11 +130,9 @@ export function LanguageUpdatePage() {
         if (fetchedCurrentLanguageForTidRef.current !== formValues.deviceSerialNumber) {
           fetchedCurrentLanguageForTidRef.current = formValues.deviceSerialNumber
 
-          const currentLanguageResponse = await apiRequest(
-            `${apiConfig.currentLanguageEndpoint}/${formValues.deviceSerialNumber}`,
-            {
-              method: 'GET',
-            },
+          const currentLanguageResponse = await fetchCurrentLanguage(
+            formValues.deviceSerialNumber,
+            storage.getSelectedProfile(),
           )
 
           if (!isMounted) {
@@ -130,23 +148,10 @@ export function LanguageUpdatePage() {
           )
 
           // Extract language safely from different response structures
-          const currentLanguageValue =
-            typeof currentLanguageResponse === 'string'
-              ? currentLanguageResponse
-              : currentLanguageResponse?.data?.current_language ??
-                currentLanguageResponse?.data?.language ??
-                currentLanguageResponse?.current_language ??
-                currentLanguageResponse?.language ??
-                currentLanguageResponse?.data ??
-                ''
-
           // Update form state
           setFormValues((current) => ({
             ...current,
-            currentLanguage:
-              typeof currentLanguageValue === 'string'
-                ? currentLanguageValue
-                : String(currentLanguageValue ?? ''),
+            currentLanguage: currentLanguageResponse?.value || currentLanguageResponse?.label || '',
           }))
         }
 
@@ -157,9 +162,7 @@ export function LanguageUpdatePage() {
           failedStep = 'language-options'
           hasFetchedLanguageOptionsRef.current = true
 
-          const languageOptionsResponse = await apiRequest(apiConfig.fetchLanguageEndpoint, {
-            method: 'GET',
-          })
+          const languageOptionsResponse = await fetchAvailableLanguages()
 
           if (!isMounted) {
             return
@@ -174,21 +177,7 @@ export function LanguageUpdatePage() {
           )
 
           // Normalize response into string array
-          const rawLanguageList = Array.isArray(languageOptionsResponse?.data)
-            ? languageOptionsResponse.data
-            : Array.isArray(languageOptionsResponse)
-              ? languageOptionsResponse
-              : []
-
-          const languageList = rawLanguageList
-            .map((item) =>
-              typeof item === 'string'
-                ? item
-                : item?.language_name ?? item?.language ?? item?.name ?? '',
-            )
-            .filter(Boolean)
-
-          setLanguageOptions(languageList)
+          setLanguageOptions(languageOptionsResponse)
         }
       } catch (error) {
         // Reset refs on failure
@@ -277,53 +266,61 @@ export function LanguageUpdatePage() {
   // -----------------------------
   // Submit Handler (POST API)
   // -----------------------------
-  const handleSubmit = async (event) => {
-    event.preventDefault()
+const handleSubmit = async (event) => {
+  event.preventDefault();
 
-    // Show all validation errors if invalid
-    if (!isFormValid) {
-      setTouched({
-        vpaId: true,
-        deviceSerialNumber: true,
-        currentLanguage: true,
-        languageUpdate: true,
-      })
-      return
-    }
-
-    try {
-      setIsUpdatingLanguage(true)
-
-      // API expects only tid + update_language
-      const response = await apiRequest(apiConfig.updateLanguageEndpoint, {
-        method: 'POST',
-        body: JSON.stringify({
-          tid: formValues.deviceSerialNumber,
-          update_language: formValues.languageUpdate,
-        }),
-      })
-
-      console.log('[Language Update] update response', response)
-
-      // Store response
-      window.sessionStorage.setItem(authStorageKeys.languageUpdateResponse, JSON.stringify(response))
-
-      // Show success
-      setSuccessMessage(response?.statusDesc || response?.message || 'Language updated successfully')
-      setIsSuccessModalOpen(true)
-    } catch (error) {
-      console.error('[Language Update] Failed to update language', error)
-
-      setSnackbarState({
-        open: true,
-        message: 'unable to update language',
-        autoClose: true,
-        colorType: 'danger',
-      })
-    } finally {
-      setIsUpdatingLanguage(false)
-    }
+  if (!isFormValid) {
+    setTouched({
+      vpaId: true,
+      deviceSerialNumber: true,
+      currentLanguage: true,
+      languageUpdate: true,
+    });
+    return;
   }
+
+  try {
+    setIsUpdatingLanguage(true);
+
+    const response = await updateLanguage({
+      tid: formValues.deviceSerialNumber,
+      delete_language: formValues.currentLanguage,
+      update_language: formValues.languageUpdate,
+      status: 'ACTIVE',
+      errorDesc: '',
+    });
+
+    console.log('[Language Update] update response', response);
+
+    // ✅ Store response
+    window.sessionStorage.setItem(
+      authStorageKeys.languageUpdateResponse,
+      JSON.stringify(response)
+    );
+
+    // ✅ HANDLE RESPONSE PROPERLY
+    if (response?.result === "success" || response?.responseCode === "01") {
+      setSuccessMessage(
+        response?.message || "Request successfully initiated"
+      );
+      setIsSuccessModalOpen(true);
+    } else {
+      throw new Error(response?.message || "Language update failed");
+    }
+
+  } catch (error) {
+    console.error('[Language Update] Failed to update language', error);
+
+    setSnackbarState({
+      open: true,
+      message: error?.message || 'Unable to update language',
+      autoClose: true,
+      colorType: 'danger',
+    });
+  } finally {
+    setIsUpdatingLanguage(false);
+  }
+};
 
   // -----------------------------
   // UI Rendering
@@ -333,7 +330,7 @@ export function LanguageUpdatePage() {
       {/* Loader overlay for API calls */}
       <LoaderOverlay
         open={isInitializingPage || isUpdatingLanguage}
-        text="IDBI Bank Loading........"
+        text="CBOI Loading........"
       />
 
       {/* Snackbar for errors */}
@@ -415,8 +412,8 @@ export function LanguageUpdatePage() {
             >
               <option value="">Select Language Update</option>
               {languageOptions.map((language) => (
-                <option key={language} value={language}>
-                  {language}
+                <option key={language.value} value={language.value}>
+                  {language.label}
                 </option>
               ))}
             </select>

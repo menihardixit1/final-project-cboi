@@ -193,7 +193,7 @@ export function PortalTopNav({ isSidebarCollapsed, onToggleSidebar, onLogout }) 
     storedUserDetailsRecord?.merchantName ??
     storedUserDetailsRecord?.name ??
     storedUserDetailsRecord?.adminName ??
-    'IDBI INTERNAL'
+    'CBOI INTERNAL'
   const profileAvatarLabel = String(profileDisplayName).trim().charAt(0).toUpperCase() || 'I'
 
   const handleViewDetails = async () => {
@@ -250,7 +250,7 @@ export function PortalTopNav({ isSidebarCollapsed, onToggleSidebar, onLogout }) 
 
   return (
     <header className="portal-topnav">
-      <LoaderOverlay open={isFetchingProfileDetails} text="IDBI Bank Loading........" />
+      <LoaderOverlay open={isFetchingProfileDetails} text="CBOI Loading........" />
 
       <Snackbar
         open={snackbarState.open}

@@ -1,16 +1,17 @@
 import { useEffect } from 'react'
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from 'oidc-react'
 import './App.css'
 import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/portal/DashboardPage'
-import { HelpSupportPage } from './pages/portal/HelpSupportPage'
+import {HelpSupportPage} from './pages/portal/HelpSupportPage'
 import { LanguageUpdatePage } from './pages/portal/LanguageUpdatePage'
 import { PortalLayout } from './pages/portal/PortalLayout'
 import { QrDetailsPage } from './pages/portal/QrDetailsPage'
 import { ReportsPage } from './pages/portal/ReportsPage'
 import { logout as logoutUser, saveOidcUserSession } from './services/authService'
+import { storage } from './utils/storage'
 
 function ProtectedRoute({ isLoggedIn, children }) {
   if (!isLoggedIn) {
@@ -22,8 +23,7 @@ function ProtectedRoute({ isLoggedIn, children }) {
 
 function App() {
   const auth = useAuth()
-  const navigate = useNavigate()
-  const isLoggedIn = Boolean(auth.userData?.access_token)
+  const isLoggedIn = Boolean(auth.userData?.access_token || storage.getToken())
 
   useEffect(() => {
     if (auth.userData) {

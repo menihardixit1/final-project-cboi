@@ -1,4 +1,12 @@
 import { useMemo, useState } from 'react'
+import {
+  closeSupportTicket,
+  createSupportTicket,
+  getSupportTicketDetails,
+  getSupportTickets,
+  reopenSupportTicket,
+  sendSupportReply,
+} from '../../services/supportApi'
 import '../../components/portal/styles/HelpSupportPage.css'
 
 const initialTickets = [
@@ -117,6 +125,52 @@ const initialRaiseForm = {
   attachmentName: '',
 }
 
+function formatTicketDate(value) {
+  if (!value) {
+    return '-'
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function mapApiMessage(message) {
+  return {
+    id: message.id,
+    author: message.senderName,
+    initials: message.senderInitials,
+    sentAt: formatTicketDate(message.sentAt),
+    text: message.message,
+  }
+}
+
+function mapApiTicket(ticket) {
+  return {
+    id: `#${ticket.ticketId}`,
+    transactionId: ticket.transactionId,
+    raisedOn: formatTicketDate(ticket.raisedDate),
+    raisedDate: ticket.raisedDate,
+    number: ticket.phoneNumber,
+    operation: ticket.operation,
+    status: ticket.status,
+    reasonType: ticket.reasonType,
+    description: ticket.description,
+    messages: Array.isArray(ticket.messages) ? ticket.messages.map(mapApiMessage) : [],
+  }
+}
+
 function getStatusClassName(status) {
   switch (status) {
     case 'Pending':
@@ -148,6 +202,7 @@ export function HelpSupportPage() {
   const [submittedFilters, setSubmittedFilters] = useState(null)
   const [raiseForm, setRaiseForm] = useState(initialRaiseForm)
   const [replyMessage, setReplyMessage] = useState('')
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false)
 
   const activeTicket = useMemo(
     () => tickets.find((ticket) => ticket.id === activeTicketId) ?? null,
@@ -179,36 +234,24 @@ export function HelpSupportPage() {
     })
   }, [submittedFilters, tickets])
 
-  const handleRaiseTicketSubmit = (event) => {
+  const handleRaiseTicketSubmit = async (event) => {
     event.preventDefault()
 
-    const nextTicket = {
-      id: `#3523${60 + tickets.length}`,
+    const response = await createSupportTicket({
       transactionId: raiseForm.transactionId || `2139${Date.now()}`.slice(0, 13),
-      raisedOn: '31/03/2026, 05:20:00 PM',
-      raisedDate: '2026-03-31',
-      number: '+91 9349872421',
+      phoneNumber: '+91 9349872421',
       operation: raiseForm.reason || 'Other',
-      status: 'Pending',
       reasonType: raiseForm.reason || 'Other',
       description: raiseForm.description || 'No description added.',
-      messages: [
-        {
-          id: `m-${Date.now()}`,
-          author: 'Program Manager',
-          initials: 'PM',
-          sentAt: '31 Mar, 2026 05:20 PM',
-          text: raiseForm.description || 'No description added.',
-        },
-      ],
-    }
+    })
+    const nextTicket = mapApiTicket(response.data)
 
     setTickets((current) => [nextTicket, ...current])
     setRaiseForm(initialRaiseForm)
     setIsRaiseTicketOpen(false)
   }
 
-  const handleFilterSubmit = () => {
+  const handleFilterSubmit = async () => {
     if (!filters.startDate || !filters.endDate) {
       return
     }
@@ -223,33 +266,40 @@ export function HelpSupportPage() {
       startDate: normalizedStartDate,
       endDate: normalizedEndDate,
     }))
-    setSubmittedFilters({
+    const nextFilters = {
       ...filters,
       startDate: normalizedStartDate,
       endDate: normalizedEndDate,
-    })
+    }
+
+    setSubmittedFilters(nextFilters)
+    setIsLoadingTickets(true)
+
+    try {
+      const response = await getSupportTickets(nextFilters)
+      setTickets(response.data.map(mapApiTicket))
+    } finally {
+      setIsLoadingTickets(false)
+    }
   }
 
-  const handleSendReply = () => {
+  const handleSendReply = async () => {
     if (!replyMessage.trim() || !activeTicket) {
       return
     }
+
+    const response = await sendSupportReply({
+      ticketId: activeTicket.id.replace('#', ''),
+      message: replyMessage.trim(),
+    })
+    const nextMessage = mapApiMessage(response.data)
 
     setTickets((current) =>
       current.map((ticket) =>
         ticket.id === activeTicket.id
           ? {
               ...ticket,
-              messages: [
-                ...ticket.messages,
-                {
-                  id: `m-${Date.now()}`,
-                  author: 'Program Manager',
-                  initials: 'PM',
-                  sentAt: '31 Mar, 2026 05:35 PM',
-                  text: replyMessage.trim(),
-                },
-              ],
+              messages: [...ticket.messages, nextMessage],
             }
           : ticket,
       ),
@@ -257,11 +307,12 @@ export function HelpSupportPage() {
     setReplyMessage('')
   }
 
-  const handleCloseTicket = () => {
+  const handleCloseTicket = async () => {
     if (!activeTicket) {
       return
     }
 
+    await closeSupportTicket(activeTicket.id.replace('#', ''))
     setTickets((current) =>
       current.map((ticket) =>
         ticket.id === activeTicket.id
@@ -275,11 +326,12 @@ export function HelpSupportPage() {
     setIsCloseTicketOpen(false)
   }
 
-  const handleReopenTicket = () => {
+  const handleReopenTicket = async () => {
     if (!activeTicket) {
       return
     }
 
+    await reopenSupportTicket(activeTicket.id.replace('#', ''))
     setTickets((current) =>
       current.map((ticket) =>
         ticket.id === activeTicket.id
@@ -290,6 +342,21 @@ export function HelpSupportPage() {
           : ticket,
       ),
     )
+  }
+
+  const handleViewDetails = async (ticketId) => {
+    setActiveTicketId(ticketId)
+
+    try {
+      const response = await getSupportTicketDetails(ticketId.replace('#', ''))
+      const detailedTicket = mapApiTicket(response.data)
+
+      setTickets((current) =>
+        current.map((ticket) => (ticket.id === ticketId ? detailedTicket : ticket)),
+      )
+    } catch (error) {
+      console.error('[Help Support] Failed to fetch ticket details', error)
+    }
   }
 
   return (
@@ -396,7 +463,13 @@ export function HelpSupportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTickets.length ? (
+                  {isLoadingTickets ? (
+                    <tr>
+                      <td className="help-support-table__empty" colSpan="6">
+                        Loading tickets...
+                      </td>
+                    </tr>
+                  ) : filteredTickets.length ? (
                     filteredTickets.map((ticket) => (
                       <tr key={ticket.id}>
                         <td>{ticket.transactionId}</td>
@@ -410,7 +483,7 @@ export function HelpSupportPage() {
                           <button
                             className="help-support-table__link"
                             type="button"
-                            onClick={() => setActiveTicketId(ticket.id)}
+                            onClick={() => handleViewDetails(ticket.id)}
                           >
                             View Details
                           </button>

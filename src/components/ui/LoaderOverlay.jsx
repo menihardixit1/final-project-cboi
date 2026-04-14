@@ -1,4 +1,4 @@
-export function LoaderOverlay({ open, text = 'IDBI Bank Loading........' }) {
+export function LoaderOverlay({ open, text = 'CBOI Loading........' }) {
   if (!open) {
     return null
   }

@@ -6,7 +6,18 @@ async function parseJsonSafely(response) {
   const contentType = response.headers.get('content-type') ?? ''
 
   if (!contentType.includes('application/json')) {
-    return null
+    const text = await response.text()
+
+    if (!text) {
+      return null
+    }
+
+    try {
+      const decrypted = decodeApiResponse({ ResponseData: text })
+      return typeof decrypted === 'string' ? JSON.parse(decrypted) : decrypted
+    } catch {
+      return null
+    }
   }
 
   return response.json()
@@ -75,7 +86,7 @@ export async function apiRequest(url, options = {}) {
   }
 
   const rawData = await parseJsonSafely(response)
-  // decodeApiResponse is a no-op for plain JSON responses and only decrypts ResponseData payloads.
+  // decodeApiResponse is a no-op for plain JSON responses and decrypts wrapped encrypted payloads.
   const data = decodeApiResponse(rawData)
 
   if (!response.ok) {

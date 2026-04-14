@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import cboiBankLogo from '../../assets/cboi.png'
 import { authStorageKeys } from '../../config/authConfig'
-import { apiConfig } from '../../config/apiConfig'
 import { LoaderOverlay } from '../../components/ui/LoaderOverlay'
 import { Snackbar } from '../../components/ui/Snackbar'
-import { apiRequest } from '../../services/apiClient'
+import { convertQrToBase64 } from '../../services/qrApi'
+import { buildDynamicQrString, getBase64ImageSrc } from '../../utils/qr'
+import { storage } from '../../utils/storage'
 import '../../components/portal/styles/ReportsPage.css'
 import '../../components/portal/styles/QrDetailsPage.css'
 
@@ -27,22 +28,13 @@ function formatCountdown(secondsLeft) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-// Convert base64 string to browser-friendly PNG data URL
-function toPngDataUrl(base64Image) {
-  if (!base64Image || typeof base64Image !== 'string') {
-    return ''
-  }
-
-  // If already a valid data URL, return as-is
-  if (base64Image.startsWith('data:image')) {
-    return base64Image
-  }
-
-  // Wrap raw base64 string into PNG format
-  return `data:image/png;base64,${base64Image}`
-}
-
 function getStoredUserDetails() {
+  const selectedProfile = storage.getSelectedProfile()
+
+  if (selectedProfile?.vpa_id || selectedProfile?.qr_string) {
+    return selectedProfile
+  }
+
   const storedUserDetails = window.sessionStorage.getItem(authStorageKeys.userDetails)
   if (!storedUserDetails) {
     return null
@@ -106,12 +98,12 @@ export function QrDetailsPage() {
     storedUserDetails?.merchantName ??
     storedUserDetails?.merchant_name_on_qr ??
     storedUserDetails?.adminName ??
-    'IDBI BANK SB ISERVEU'
+    'CBOI BANK SB ISERVEU'
   const merchantUpiId =
     storedUserDetails?.vpa_id ??
     storedUserDetails?.upi_id ??
     storedUserDetails?.upiId ??
-    'idbitestuser.iserveu@idbi'
+    'cboitestuser.iserveu@cboi'
 
   // Dynamic title based on QR type
   const qrTitle = useMemo(() => {
@@ -151,12 +143,7 @@ export function QrDetailsPage() {
       setIsFetchingStaticQr(true)
 
       // API call to fetch static QR
-      const response = await apiRequest(apiConfig.staticQrEndpoint, {
-        method: 'POST',
-        body: JSON.stringify({
-          qrString,
-        }),
-      })
+      const response = await convertQrToBase64(qrString)
 
       console.log('[QR Details] static QR response', response)
 
@@ -171,7 +158,7 @@ export function QrDetailsPage() {
       window.sessionStorage.setItem(authStorageKeys.staticQrResponse, JSON.stringify(response))
 
       // Convert and display QR image
-      setStaticQrImageUrl(toPngDataUrl(base64Image))
+      setStaticQrImageUrl(getBase64ImageSrc(base64Image))
       setShowStaticQr(true)
     } catch (error) {
       console.error('[QR Details] Failed to fetch static QR', error)
@@ -206,7 +193,7 @@ export function QrDetailsPage() {
     // Create temporary link to download image
     const downloadLink = document.createElement('a')
     downloadLink.href = staticQrImageUrl
-    downloadLink.download = 'idbi-static-qr.png'
+    downloadLink.download = 'cboi-static-qr.png'
     document.body.appendChild(downloadLink)
     downloadLink.click()
     document.body.removeChild(downloadLink)
@@ -249,7 +236,7 @@ export function QrDetailsPage() {
   // -----------------------------
   // Generate Dynamic QR (Frontend Simulation)
   // -----------------------------
-  const handleGenerateQr = () => {
+  const handleGenerateQr = async () => {
     // Validation: empty
     if (!trimmedAmount) {
       setSnackbarState({
@@ -274,10 +261,37 @@ export function QrDetailsPage() {
       return
     }
 
-    // Reset and generate new QR
-    setGeneratedAmount(trimmedAmount)
-    setSecondsRemaining(DYNAMIC_QR_VALIDITY_SECONDS)
-    setShowDynamicQr(true)
+    const qrString = storedUserDetails?.qr_string ?? ''
+
+    try {
+      setIsFetchingStaticQr(true)
+      const dynamicQrString = buildDynamicQrString({
+        baseQrString: qrString,
+        amount: trimmedAmount,
+      })
+      const response = await convertQrToBase64(dynamicQrString)
+      const base64Image = response?.base64Image ?? response?.data?.base64Image ?? ''
+
+      if (!base64Image) {
+        throw new Error('Missing base64Image in QR response')
+      }
+
+      setStaticQrImageUrl(getBase64ImageSrc(base64Image))
+      setGeneratedAmount(trimmedAmount)
+      setSecondsRemaining(DYNAMIC_QR_VALIDITY_SECONDS)
+      setShowDynamicQr(true)
+    } catch (error) {
+      console.error('[QR Details] Failed to generate dynamic QR', error)
+      setSnackbarState({
+        open: true,
+        message: error?.message || 'Unable to generate QR',
+        autoClose: true,
+        colorType: 'danger',
+      })
+      setShowDynamicQr(false)
+    } finally {
+      setIsFetchingStaticQr(false)
+    }
   }
 
   // -----------------------------
@@ -286,7 +300,7 @@ export function QrDetailsPage() {
   return (
     <section className="portal-section qr-details-page">
       {/* Loader for static QR API */}
-      <LoaderOverlay open={isFetchingStaticQr} text="IDBI Bank Loading........" />
+      <LoaderOverlay open={isFetchingStaticQr} text="CBOI Loading........" />
 
       {/* Snackbar for errors */}
       <Snackbar
@@ -408,17 +422,13 @@ export function QrDetailsPage() {
                   <div className="qr-ticket__dynamic-card">
                     <div className="qr-ticket__dynamic-top-border" aria-hidden="true" />
                     <div className="qr-ticket__dynamic-inner">
-                      <img className="qr-ticket__dynamic-logo" src={cboiBankLogo} alt="IDBI Bank" />
+                      <img className="qr-ticket__dynamic-logo" src={cboiBankLogo} alt="CBOI Bank" />
 
                       <div className="qr-ticket__dynamic-meta">UPI ID : {merchantUpiId}</div>
 
                       <div className="qr-ticket__merchant">{merchantName}</div>
 
-                      <div className="qr-ticket__code" aria-hidden="true">
-                        <span className="qr-ticket__finder qr-ticket__finder--top-left" />
-                        <span className="qr-ticket__finder qr-ticket__finder--top-right" />
-                        <span className="qr-ticket__finder qr-ticket__finder--bottom-left" />
-                      </div>
+                      <img className="qr-ticket__image" src={staticQrImageUrl} alt="Dynamic merchant QR code" />
 
                       <div className="qr-ticket__upi">UPI ID : {merchantUpiId}</div>
 

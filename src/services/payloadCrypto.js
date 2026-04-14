@@ -54,12 +54,18 @@ export function decodeApiResponse(responseData) {
     return responseData
   }
 
-  if (!responseData.ResponseData) {
+  const encryptedValue =
+    responseData.ResponseData ??
+    responseData.RequestData ??
+    (typeof responseData.data === 'string' ? responseData.data : null) ??
+    (typeof responseData.response === 'string' ? responseData.response : null)
+
+  if (!encryptedValue) {
     return responseData
   }
 
-  // Some APIs return encrypted JSON inside ResponseData, others already return plain JSON.
-  const decryptedString = decryptResponseData(responseData.ResponseData)
+  // Some APIs return encrypted JSON inside different wrapper keys.
+  const decryptedString = decryptResponseData(encryptedValue)
 
   try {
     return JSON.parse(decryptedString)

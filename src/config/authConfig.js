@@ -40,14 +40,14 @@ export const authConfig = {
 }
 
 export const authStorageKeys = {
-  local: 'idbi-auth-session',
-  session: 'idbi-auth-session-temporary',
-  oidcRawSession: 'idbi-oidc-token-response',
-  oidcProfile: 'idbi-oidc-profile-data',
-  userDetails: 'idbi-user-details-response',
-  userDetailsFetchPending: 'idbi-user-details-fetch-pending',
-  currentLanguage: 'idbi-current-language-response',
-  languageOptions: 'idbi-language-options-response',
-  languageUpdateResponse: 'idbi-language-update-response',
-  staticQrResponse: 'idbi-static-qr-response',
+  local: 'cboi-auth-session',
+  session: 'cboi-auth-session-temporary',
+  oidcRawSession: 'cboi-oidc-token-response',
+  oidcProfile: 'cboi-oidc-profile-data',
+  userDetails: 'cboi-user-details-response',
+  userDetailsFetchPending: 'cboi-user-details-fetch-pending',
+  currentLanguage: 'cboi-current-language-response',
+  languageOptions: 'cboi-language-options-response',
+  languageUpdateResponse: 'cboi-language-update-response',
+  staticQrResponse: 'cboi-static-qr-response',
 }

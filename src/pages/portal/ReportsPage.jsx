@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { authStorageKeys } from '../../config/authConfig'
-import { apiConfig } from '../../config/apiConfig'
 import { LoaderOverlay } from '../../components/ui/LoaderOverlay'
 import { Snackbar } from '../../components/ui/Snackbar'
+import { getReportStatus, submitTransactionReportQuery } from '../../services/reportApi'
+import { storage } from '../../utils/storage'
 import '../../components/portal/styles/ReportsPage.css'
 
 // List of months for monthly filter dropdown
@@ -92,8 +93,46 @@ function getMonthDateRange(monthName) {
   }
 }
 
+function isFutureDate(dateValue) {
+  if (!dateValue) {
+    return false
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const selectedDate = new Date(dateValue)
+  selectedDate.setHours(0, 0, 0, 0)
+
+  return selectedDate > today
+}
+
+function normalizeReportStatusValue(value) {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+function isReportRunning(statusRecord) {
+  const statusValue = normalizeReportStatusValue(statusRecord?.status)
+  return statusValue === 'RUNNING' || statusValue === 'PROCESSING' || statusValue === 'PENDING'
+}
+
+function isReportComplete(statusRecord) {
+  const statusValue = normalizeReportStatusValue(statusRecord?.status)
+  return (
+    statusValue === 'COMPLETED' ||
+    statusValue === 'COMPLETE' ||
+    statusValue === 'READY' ||
+    Boolean(statusRecord?.signed_url)
+  )
+}
+
 // Fetch user details from sessionStorage and normalize structure
 function getStoredUserDetailsRecord() {
+  const selectedProfile = storage.getSelectedProfile()
+
+  if (selectedProfile?.vpa_id) {
+    return selectedProfile
+  }
+
   const storedUserDetails = window.sessionStorage.getItem(authStorageKeys.userDetails)
 
   if (!storedUserDetails) {
@@ -174,7 +213,7 @@ function downloadReportRowsAsExcel(rows) {
   const downloadUrl = window.URL.createObjectURL(blob)
   const downloadLink = document.createElement('a')
   downloadLink.href = downloadUrl
-  downloadLink.download = 'idbi-reports.csv'
+  downloadLink.download = 'cboi-reports.csv'
 
   document.body.appendChild(downloadLink)
   downloadLink.click()
@@ -182,38 +221,6 @@ function downloadReportRowsAsExcel(rows) {
 
   window.URL.revokeObjectURL(downloadUrl)
   return true
-}
-
-// API call to fetch reports
-async function fetchReports({ startDate, endDate, vpaId }) {
-  const response = await fetch(apiConfig.reportsQuerySubmitUserEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      pass_key: apiConfig.staticPassKey,
-    },
-    body: JSON.stringify({
-      startDate,
-      endDate,
-      vpa_id: vpaId,
-      mode: 'both',
-    }),
-  })
-
-  const responseData = await response.json().catch(() => null)
-
-  if (!response.ok) {
-    const error = new Error(
-      responseData?.statusDescription ||
-      responseData?.message ||
-      `API request failed with status ${response.status}`,
-    )
-    error.statusDescription = responseData?.statusDescription ?? ''
-    throw error
-  }
-
-  return responseData
 }
 
 export function ReportsPage() {
@@ -237,6 +244,9 @@ export function ReportsPage() {
 
   // API response states
   const [reportResponse, setReportResponse] = useState(null)
+  const [reportStatus, setReportStatus] = useState(null)
+  const [reportQueryId, setReportQueryId] = useState('')
+  const [isPollingReportStatus, setIsPollingReportStatus] = useState(false)
   const [reportRows, setReportRows] = useState([])
   const [isFetchingReports, setIsFetchingReports] = useState(false)
 
@@ -251,12 +261,15 @@ export function ReportsPage() {
   // -----------------------------
   // Fetch Reports
   // -----------------------------
-  const loadReports = async ({ nextStartDate, nextEndDate }) => {
+  const loadReports = async ({ nextStartDate, nextEndDate, mode }) => {
     const userDetailsRecord = getStoredUserDetailsRecord()
     const vpaId = userDetailsRecord?.vpa_id ?? ''
 
     if (!vpaId) {
       setReportResponse(null)
+      setReportStatus(null)
+      setReportQueryId('')
+      setIsPollingReportStatus(false)
       setReportRows([])
       setSnackbarState({
         open: true,
@@ -270,15 +283,46 @@ export function ReportsPage() {
     try {
       setIsFetchingReports(true)
 
-      const response = await fetchReports({
+      const response = await submitTransactionReportQuery({
         startDate: formatDateForApi(nextStartDate),
         endDate: formatDateForApi(nextEndDate),
-        vpaId,
+        vpa_id: vpaId,
+        mode,
       })
 
-      console.log('[Reports] querysubmit_user response', response)
+      console.log('[Reports] querysubmit_username response', response)
       setReportResponse(response)
-      setReportRows(normalizeReportRows(response?.data))
+
+      if (mode === 'excel') {
+        setReportRows([])
+
+        if (response?.query_id) {
+          setReportQueryId(response.query_id)
+          try {
+            const statusResponse = await getReportStatus(response.query_id)
+            console.log('[Reports] get_report_status response', statusResponse)
+            const nextStatus = statusResponse?.data ?? statusResponse
+            setReportStatus(nextStatus)
+            setIsPollingReportStatus(isReportRunning(nextStatus))
+          } catch (statusError) {
+            console.error('[Reports] Failed to fetch report status', statusError)
+            setReportStatus(null)
+            setIsPollingReportStatus(true)
+          }
+        }
+
+        setSnackbarState({
+          open: true,
+          message: response?.statusDescription || 'Report submission successful',
+          autoClose: true,
+          colorType: 'success',
+        })
+      } else {
+        setReportStatus(null)
+        setReportQueryId('')
+        setIsPollingReportStatus(false)
+        setReportRows(normalizeReportRows(response?.data))
+      }
 
       // Reset pagination
       setCurrentPage(1)
@@ -286,6 +330,9 @@ export function ReportsPage() {
     } catch (error) {
       console.error('[Reports] Failed to fetch reports', error)
       setReportResponse(null)
+      setReportStatus(null)
+      setReportQueryId('')
+      setIsPollingReportStatus(false)
       setReportRows([])
       setSnackbarState({
         open: true,
@@ -310,8 +357,42 @@ export function ReportsPage() {
     loadReports({
       nextStartDate: todayInputValue,
       nextEndDate: todayInputValue,
+      mode: 'both',
     })
   }, [filterType, todayInputValue])
+
+  useEffect(() => {
+    if (!reportQueryId || !isPollingReportStatus) {
+      return undefined
+    }
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const statusResponse = await getReportStatus(reportQueryId)
+        console.log('[Reports] get_report_status polling response', statusResponse)
+        const nextStatus = statusResponse?.data ?? statusResponse
+        setReportStatus(nextStatus)
+
+        if (isReportComplete(nextStatus)) {
+          setIsPollingReportStatus(false)
+          setSnackbarState({
+            open: true,
+            message: 'Report completed. Download is ready.',
+            autoClose: true,
+            colorType: 'success',
+          })
+        } else if (!isReportRunning(nextStatus)) {
+          setIsPollingReportStatus(false)
+        }
+      } catch (error) {
+        console.error('[Reports] Failed to poll report status', error)
+      }
+    }, 10000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [isPollingReportStatus, reportQueryId])
 
   // Search filtering
   const filteredRows = useMemo(() => {
@@ -398,9 +479,30 @@ export function ReportsPage() {
       return
     }
 
+    if (isFutureDate(startDate) || isFutureDate(endDate)) {
+      setSnackbarState({
+        open: true,
+        message: 'Start date and end date cannot be in the future',
+        autoClose: true,
+        colorType: 'warning',
+      })
+      return
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+      setSnackbarState({
+        open: true,
+        message: 'Start date cannot be greater than end date',
+        autoClose: true,
+        colorType: 'warning',
+      })
+      return
+    }
+
     loadReports({
       nextStartDate: startDate,
       nextEndDate: endDate,
+      mode: 'excel',
     })
   }
 
@@ -423,10 +525,33 @@ export function ReportsPage() {
     loadReports({
       nextStartDate: monthDateRange.startDate,
       nextEndDate: monthDateRange.endDate,
+      mode: 'excel',
     })
   }
 
   const handleDownloadAll = () => {
+    if (reportStatus?.signed_url) {
+      const downloadLink = document.createElement('a')
+      downloadLink.href = reportStatus.signed_url
+      downloadLink.download = 'cboi-reports.xlsx'
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      return
+    }
+
+    if (reportResponse?.query_id && !reportStatus?.signed_url) {
+      setSnackbarState({
+        open: true,
+        message: isPollingReportStatus
+          ? 'Report is still running. Download will be enabled when completed.'
+          : 'Report is submitted. Download link is not ready yet.',
+        autoClose: true,
+        colorType: 'warning',
+      })
+      return
+    }
+
     const hasDownloaded = downloadReportRowsAsExcel(reportRows)
 
     if (!hasDownloaded) {
@@ -446,7 +571,7 @@ export function ReportsPage() {
     // UI remains unchanged (only comments added above)
     <section className="portal-section reports-page">
           {/* Loader for API calls */}
-      <LoaderOverlay open={isFetchingReports} text="IDBI Bank Loading........" />
+      <LoaderOverlay open={isFetchingReports} text="CBOI Loading........" />
 
       {/* Snackbar for error/warning messages */}
       <Snackbar
@@ -584,14 +709,25 @@ export function ReportsPage() {
           <div className="reports-summary">
             <span>Rows: {reportResponse?.row_count ?? reportRows.length}</span>
             <span>Total Amount: {reportResponse?.total_amount ?? 0}</span>
+            {reportQueryId ? (
+              <span>
+                Report Status:{' '}
+                {isPollingReportStatus
+                  ? 'Running'
+                  : reportStatus?.signed_url
+                    ? 'Completed'
+                    : reportStatus?.status ?? 'Submitted'}
+              </span>
+            ) : null}
 
             {/* Download all rows */}
             <button
               className="reports-action-button reports-action-button--small"
               type="button"
               onClick={handleDownloadAll}
+              disabled={Boolean(reportQueryId) && !reportStatus?.signed_url}
             >
-              Download All
+              {isPollingReportStatus ? 'Preparing...' : 'Download All'}
             </button>
           </div>
         </div>

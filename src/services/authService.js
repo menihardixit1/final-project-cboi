@@ -79,7 +79,7 @@ function buildMockSession({ username, rememberDevice }) {
     user_name: username,
     preferred_username: username,
     adminName: username,
-    bankCode: 'IDBI',
+    bankCode: 'CBOI',
     email: `${username}@example.com`,
     scope: getScopeValue(),
     iss: authConfig.issuer,
@@ -178,6 +178,12 @@ export function saveOidcUserSession(userData, { persist = true } = {}) {
   }
 
   saveAuthSession(session, { persist })
+  window.localStorage.setItem('token', session.accessToken)
+
+  if (session.idToken) {
+    window.localStorage.setItem('id_token', session.idToken)
+  }
+
   return session
 }
 
@@ -350,6 +356,10 @@ export function logout() {
   clearAuthSession()
   window.sessionStorage.removeItem(authStorageKeys.oidcRawSession)
   window.sessionStorage.removeItem(authStorageKeys.oidcProfile)
+  window.localStorage.removeItem('token')
+  window.localStorage.removeItem('id_token')
+  window.localStorage.removeItem('profile_list')
+  window.localStorage.removeItem('selected_profile')
 }
 
 export function getAuthorizationHeader() {
